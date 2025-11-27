@@ -90,6 +90,8 @@ class YoutubeMediaEngine implements MediaEngine, OverlayMenu.SelectionHandler {
 	void ended() {
 		current = end;
 		cb.onEngineEnded(this);
+		// THÊM DÒNG NÀY: Tự động chuyển bài tiếp theo
+        web.next();
 	}
 
 	void paused() {

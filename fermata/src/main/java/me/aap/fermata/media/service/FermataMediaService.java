@@ -115,8 +115,6 @@ public class FermataMediaService extends MediaBrowserServiceCompat {
 		return lib;
 	}
 
-
-
     @Override
     public void onCreate() {
         super.onCreate();

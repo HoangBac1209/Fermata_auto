@@ -139,17 +139,65 @@ public class YoutubeWebView extends FermataWebView {
 	}
 
 	private void prevNext(boolean next) {
-		FermataChromeClient chrome = getWebChromeClient();
-		if (chrome == null) return;
-		chrome.exitFullScreen().thenRun(() -> evaluateJavascript("""
-				function prevNextVideo() {
-				  const buttons = document.querySelectorAll('button.player-middle-controls-prev-next-button');
-				  console.log('Prev/Next buttons:', buttons);
-				  if (buttons) buttons[%d].click();
-				}
-				setTimeout(prevNextVideo, 600);
-				""".formatted(next ? 1 : 0), null));
-	}
+        FermataChromeClient chrome = getWebChromeClient();
+        if (chrome == null) return;
+
+        String jsCommand = String.format(
+            "javascript:(function() {" +
+            "   var isNext = %s;" +
+            "   console.log('Fermata: Smart Navigating ' + (isNext ? 'Next' : 'Prev'));" +
+
+            // --- BƯỚC 1: DÙNG PHÍM TẮT (Shift+N / Shift+P) ---
+            "   try {" +
+            "       var keyChar = isNext ? 'N' : 'P';" +
+            "       var keyCode = isNext ? 78 : 80;" +
+            "       var modifiers = { shiftKey: true, bubbles: true, cancelable: true, view: window };" +
+            "       var eventDown = new KeyboardEvent('keydown', Object.assign(modifiers, { key: keyChar, code: 'Key' + keyChar, keyCode: keyCode, which: keyCode }));" +
+            "       document.dispatchEvent(eventDown);" +
+            "       var eventUp = new KeyboardEvent('keyup', Object.assign(modifiers, { key: keyChar, code: 'Key' + keyChar, keyCode: keyCode, which: keyCode }));" +
+            "       document.dispatchEvent(eventUp);" +
+            "   } catch(e) {}" +
+
+            // --- BƯỚC 2: TÌM VÀ CLICK NÚT (Dự phòng nếu phím tắt không ăn) ---
+            "   setTimeout(function() {" +
+            "       var btn = null;" +
+            
+            // 2.1. Tìm theo Class Desktop chuẩn
+            "       btn = document.querySelector(isNext ? '.ytp-next-button' : '.ytp-prev-button');" +
+            
+            // 2.2. Tìm theo ARIA LABEL (Đoạn bạn cần - hỗ trợ cả tiếng Anh và Tiếng Việt không dấu)" +
+            "       if (!btn) {" +
+            "           var query = isNext ? 'button[aria-label*=\"Next\"], button[aria-label*=\"tiếp\"]' : 'button[aria-label*=\"Previous\"], button[aria-label*=\"trước\"]';" +
+            "           btn = document.querySelector(query);" +
+            "       }" +
+
+            // 2.3. Tìm theo Class Mobile cũ
+            "       if (!btn) {" +
+            "           var mobileBtns = document.querySelectorAll('button.player-middle-controls-prev-next-button');" +
+            "           if (mobileBtns.length > 1) btn = mobileBtns[isNext ? 1 : 0];" +
+            "       }" +
+
+            // --- THỰC HIỆN CLICK (MÔ PHỎNG CHUỘT ĐẦY ĐỦ) ---
+            "       if (btn && btn.offsetParent !== null) {" +
+            "           var opts = { bubbles: true, cancelable: true, view: window };" +
+            "           btn.dispatchEvent(new MouseEvent('mousedown', opts));" +
+            "           btn.dispatchEvent(new MouseEvent('mouseup', opts));" +
+            "           btn.dispatchEvent(new MouseEvent('click', opts));" +
+            "           console.log('Fermata: Clicked button via DOM');" +
+            "       }" +
+            
+            // --- BƯỚC 3: CÙNG ĐƯỜNG THÌ TUA HẾT BÀI ---
+            "       else if (isNext) {" +
+            "           var v = document.querySelector('video');" +
+            "           if (v && !v.ended) { v.currentTime = v.duration; }" +
+            "       }" +
+            "   }, 150);" + // Chờ 150ms để phím tắt có tác dụng trước
+            "})()", 
+            next ? "true" : "false"
+        );
+
+        chrome.exitFullScreen().thenRun(() -> evaluateJavascript(jsCommand, null));
+    }
 
 	FutureSupplier<Long> getDuration() {
 		return getMilliseconds("duration");
