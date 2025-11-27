@@ -115,31 +115,78 @@ public class FermataMediaService extends MediaBrowserServiceCompat {
 		return lib;
 	}
 
-	@Override
-	public void onCreate() {
-		super.onCreate();
-		Context ctx = this;
-		lib = new DefaultMediaLib(FermataApplication.get());
-		session = new MediaSessionCompat(this, "FermataMediaService");
-		setSessionToken(session.getSessionToken());
-		callback = new MediaSessionCallback(this, session, lib,
-				PlaybackControlPrefs.create(FermataApplication.get().getDefaultSharedPreferences()),
-				FermataApplication.get().getHandler());
-		callback.onPrepare();
-		session.setCallback(callback);
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        Context ctx = this;
+        
+        // 1. Khởi tạo và Token
+        lib = new DefaultMediaLib(FermataApplication.get());
+        session = new MediaSessionCompat(this, "FermataMediaService");
+        setSessionToken(session.getSessionToken());
 
-		Intent mediaButtonIntent =
-				new Intent(Intent.ACTION_MEDIA_BUTTON, null, ctx, MediaButtonReceiver.class);
-		session.setMediaButtonReceiver(
-				PendingIntent.getBroadcast(ctx, 0, mediaButtonIntent, FLAG_IMMUTABLE));
-		notifColor = Color.parseColor(DEFAULT_NOTIF_COLOR);
-		App.get().getScheduler().schedule(lib::cleanUpPrefs, 1, TimeUnit.HOURS);
-		Log.d("FermataMediaService created");
-		for (FermataAddon a : AddonManager.get().getAddons()) {
-			if (a instanceof FermataMediaServiceAddon)
-				((FermataMediaServiceAddon) a).onServiceCreate(callback);
-		}
-	}
+        // 2. Callback
+        callback = new MediaSessionCallback(this, session, lib,
+                PlaybackControlPrefs.create(FermataApplication.get().getDefaultSharedPreferences()),
+                FermataApplication.get().getHandler());
+        session.setCallback(callback);
+
+        // --- BẮT ĐẦU ĐOẠN FIX: KÍCH HOẠT ANDROID AUTO ---
+
+        // A. Cờ cho phép điều khiển từ Vô lăng/Màn hình xe
+        session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS |
+                         MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS |
+                         MediaSessionCompat.FLAG_HANDLES_QUEUE_COMMANDS);
+
+        // B. (QUAN TRỌNG) Khai báo các nút bấm ban đầu.
+        // Nếu không có đoạn này, Android Auto sẽ ẩn hết nút bấm vì tưởng App không hỗ trợ.
+        PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
+                .setActions(PlaybackStateCompat.ACTION_PLAY | 
+                            PlaybackStateCompat.ACTION_PLAY_PAUSE | 
+                            PlaybackStateCompat.ACTION_SKIP_TO_NEXT | 
+                            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
+                            PlaybackStateCompat.ACTION_STOP);
+        // Đặt trạng thái là PAUSED (0ms) để hiện nút Play
+        stateBuilder.setState(PlaybackStateCompat.STATE_PAUSED, 0, 1.0f);
+        session.setPlaybackState(stateBuilder.build());
+
+        // C. (QUAN TRỌNG) Set Metadata ban đầu.
+        // Nếu Metadata rỗng, một số đầu xe sẽ không hiện trình phát.
+        MediaMetadataCompat.Builder metaBuilder = new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, "Fermata Auto")
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "Ready to play")
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, -1); // -1 là Live/Không xác định
+        session.setMetadata(metaBuilder.build());
+
+        // D. Kích hoạt Session
+        session.setActive(true);
+
+        // E. Cướp Audio Focus ngay lập tức
+        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (am != null) {
+            try {
+                // AUDIOFOCUS_GAIN: Đá văng các app nhạc khác ra khỏi loa
+                am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+            } catch (Exception e) {}
+        }
+        
+        // ------------------------------------------------
+
+        callback.onPrepare();
+
+        Intent mediaButtonIntent = new Intent(Intent.ACTION_MEDIA_BUTTON, null, ctx, MediaButtonReceiver.class);
+        session.setMediaButtonReceiver(
+                PendingIntent.getBroadcast(ctx, 0, mediaButtonIntent, FLAG_IMMUTABLE));
+        
+        notifColor = Color.parseColor(DEFAULT_NOTIF_COLOR);
+        App.get().getScheduler().schedule(lib::cleanUpPrefs, 1, TimeUnit.HOURS);
+        Log.d("FermataMediaService created");
+        
+        for (FermataAddon a : AddonManager.get().getAddons()) {
+            if (a instanceof FermataMediaServiceAddon)
+                ((FermataMediaServiceAddon) a).onServiceCreate(callback);
+        }
+    }
 
 	@Override
 	public void onDestroy() {
